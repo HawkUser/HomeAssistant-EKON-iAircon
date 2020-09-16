@@ -61,6 +61,8 @@ CONF_NAME_MAPPING = 'name_mapping'
 CONF_SSL_IGNORE = 'ssl_ignore'
 CONF_LOGIN_TYPE = 'login_type'
 DEFAULT_TIMEOUT = 10
+SSL_IGNORE = False
+SSL_VERIFY = True
 
 # What I recall are the min and max for the HVAC
 MIN_TEMP = 16
@@ -204,8 +206,10 @@ class EkonClimateController():
         self._password = config.get(CONF_PASSWORD)
         self._devices = {}
         self._name_mapping = config.get(CONF_NAME_MAPPING)
-
-        self._ssl_ignore = config.get(CONF_SSL_IGNORE)
+        global SSL_IGNORE
+        SSL_IGNORE = config.get(CONF_SSL_IGNORE)
+        global SSL_VERIFY
+        SSL_VERIFY = not SSL_IGNORE
         self._login_type = config.get(CONF_LOGIN_TYPE)
         self._ws_url = config.get(CONF_WS_URL)
 
@@ -246,8 +250,9 @@ class EkonClimateController():
     def ws_start_reciver_thread(self):
         # Could someone please explain why python-websocket doesn't offer a non-blocking event-driven WS interface?
         run_forever_lambda = lambda : self._ws.run_forever()
-        if(self._ssl_ignore):
+        if(SSL_IGNORE):
             # https://github.com/websocket-client/websocket-client
+            _LOGGER.debug("ws_start_reciver_thread SSL IGNORE")
             run_forever_lambda = lambda : self._ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE, "check_hostname": False})
         self._ws_reciver_thread = threading.Thread(target=run_forever_lambda)
         self._ws_reciver_thread.daemon = True
@@ -335,7 +340,7 @@ class EkonClimateController():
         """ Each hvac is like """
         # [{'id': xxx, 'mac': 'xxxxxxxxxxxxx', 'onoff': 85, 'light': 0, 'mode': 17, 'fan': 1, 'envTemp': 23, 'envTempShow': 23, 'tgtTemp': 24}]
         url = self._base_url + '/dev/allStatus'
-        result = self._http_session.get(url)
+        result = self._http_session.get(url, verify=SSL_VERIFY)
         if(result.status_code!=200):
             _LOGGER.error ("Error query_devices")
             return False
@@ -364,10 +369,7 @@ class EkonClimateController():
             'mainCaptcha_val': captcha,
             'isDebug': 'tRue'
         }
-        verify = True
-        if self._ssl_ignore:
-            verify = False
-        result = self._http_session.post(url, verify=verify, params=url_params, data="")
+        result = self._http_session.post(url, verify=SSL_VERIFY, params=url_params, data="")
         if(result.status_code!=200):
             _LOGGER.error('EKON Login failed! Please check credentials!')
             _LOGGER.error(result.content)
@@ -491,8 +493,7 @@ class EkonClimate(ClimateEntity):
         else:
             self._last_on_state = False
             url = url + 'False'
-
-        result = self._controller._http_session.get(url)
+        result = self._controller._http_session.get(url, verify=SSL_VERIFY)
         if(result.status_code!=200):
             _LOGGER.error(result.content)
             _LOGGER.error("TurnOnOff (onoff)error")
@@ -506,7 +507,7 @@ class EkonClimate(ClimateEntity):
         # mac, onoff, mode, fan, envtemp, tgttemp, 
         _LOGGER.info('Syncing to remote, state')
         _LOGGER.info(str(json.dumps(self._ekon_state_obj)))
-        result = self._controller._http_session.post(url, json=self._set_obj)
+        result = self._controller._http_session.post(url, json=self._set_obj, verify=SSL_VERIFY)
         if(result.status_code!=200):
             _LOGGER.error(result.content)
             _LOGGER.error("SyncAndSet (properties)error")
@@ -561,10 +562,10 @@ class EkonClimate(ClimateEntity):
             'tgtTemp': self._ekon_state_obj['tgtTemp']
         }
         url = self._controller._base_url + 'dev/setHvac'
-        result = self._controller._http_session.post(json=obj)
+        result = self._controller._http_session.post(json=obj, verify=SSL_VERIFY)
         if(result.status_code!=200):
             _LOGGER.error("SendStateToAc faild")
-            _LOGGER.errpr(result.content)
+            _LOGGER.error(result.content)
             return False
         return True
 
